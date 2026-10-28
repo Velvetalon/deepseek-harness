@@ -10,6 +10,66 @@ index befb18b..7b7da85 100644
                              stream.push({
                                  type: "toolcall_delta",
                                  contentIndex: index,
+@@ -1056,6 +1056,23 @@
+         params.push(...pendingSystemMessages);
+         pendingSystemMessages.length = 0;
+     };
++    // Anthropic requires one alternating user turn on the wire. Keep later
++    // user content in the same top-level message, including text after
++    // tool_result blocks from the preceding tool turn.
++    const appendUserMessage = (content) => {
++        if (pendingSystemMessages.length > 0) {
++            params.push({ role: "user", content });
++            return;
++        }
++        const previous = params.at(-1);
++        if (previous?.role !== "user") {
++            params.push({ role: "user", content });
++            return;
++        }
++        const previousContent = typeof previous.content === "string" ? [{ type: "text", text: previous.content }] : previous.content;
++        const nextContent = typeof content === "string" ? [{ type: "text", text: content }] : content;
++        previous.content = [...previousContent, ...nextContent];
++    };
+     for (let i = 0; i < transformedMessages.length; i++) {
+         const msg = transformedMessages[i];
+         if (msg.role === "system") {
+@@ -1087,10 +1104,7 @@ convertToolDefinitions) {
+         else if (msg.role === "user") {
+             if (typeof msg.content === "string") {
+                 if (msg.content.trim().length > 0) {
+-                    params.push({
+-                        role: "user",
+-                        content: sanitizeSurrogates(msg.content),
+-                    });
++                    appendUserMessage(sanitizeSurrogates(msg.content));
+                 }
+             }
+             else {
+@@ -1113,10 +1127,7 @@ convertToolDefinitions) {
+                 });
+                 if (filteredBlocks.length === 0)
+                     continue;
+-                params.push({
+-                    role: "user",
+-                    content: filteredBlocks,
+-                });
++                appendUserMessage(filteredBlocks);
+             }
+         }
+         else if (msg.role === "assistant") {
+@@ -1208,10 +1219,7 @@ convertToolDefinitions) {
+             }
+             // Skip the messages we've already processed.
+             i = j - 1;
+-            params.push({
+-                role: "user",
+-                content: [...toolResults, ...errorImages],
+-            });
++            appendUserMessage([...toolResults, ...errorImages]);
+         }
+     }
+     flushPendingSystemMessages();
 diff --git a/dist/api/bedrock-converse-stream.js b/dist/api/bedrock-converse-stream.js
 index 6ec62d0..abe5eee 100644
 --- a/dist/api/bedrock-converse-stream.js
