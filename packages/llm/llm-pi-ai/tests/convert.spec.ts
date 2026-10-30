@@ -887,6 +887,28 @@ describe('mapStopReason / mapUsage', () => {
     })
   })
 
+  it('classifies a completed stop with empty text and zero output tokens as EMPTY_RESPONSE', () => {
+    expect(mapStopReason(assistant({
+      stopReason: 'stop',
+      content: [{ type: 'text', text: '' }],
+      usage: usage(10, 0),
+    }))).toEqual({
+      kind: 'error',
+      failure: {
+        message: 'model "deepseek-v4-flash" returned a completed response with no content',
+        code: EMPTY_RESPONSE_CODE,
+      },
+    })
+  })
+
+  it('keeps a stop with empty text but nonzero output tokens successful', () => {
+    expect(mapStopReason(assistant({
+      stopReason: 'stop',
+      content: [{ type: 'text', text: '' }],
+      usage: usage(10, 1),
+    }))).toEqual({ kind: 'stop' })
+  })
+
   it('keeps a thinking-only stop successful (any block counts as content)', () => {
     expect(mapStopReason(assistant({ stopReason: 'stop', content: [{ type: 'thinking', thinking: 'mull' }] })))
       .toEqual({ kind: 'stop' })
