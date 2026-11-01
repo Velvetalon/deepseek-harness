@@ -9,7 +9,7 @@
  */
 
 import { brandString } from '@deepseek-ai/dsh-brand'
-import { CONTEXT_WINDOW_EXCEEDED_CODE, EMPTY_RESPONSE_CODE, isContextWindowExceededError, isQuotaExceededError, LlmError, QUOTA_EXCEEDED_CODE } from '@deepseek-ai/dsh-llm'
+import { CONTEXT_WINDOW_EXCEEDED_CODE, EMPTY_RESPONSE_CODE, isContextWindowExceededError, isQuotaExceededError, LlmError, MODEL_REFUSAL_CODE, QUOTA_EXCEEDED_CODE } from '@deepseek-ai/dsh-llm'
 import type { FinishReason, StreamChunk, TokenUsage, ToolCallId } from '@deepseek-ai/dsh-llm'
 import { isContextOverflow } from '@earendil-works/pi-ai/utils/overflow'
 import type { AssistantMessage, AssistantMessageEvent, Usage as PiUsage } from '@earendil-works/pi-ai'
@@ -39,7 +39,21 @@ export function mapUsage(usage: PiUsage): TokenUsage {
 // wrapper a bare `terminated`, so we are left pattern-matching terse words here.
 // If pi-ai ever forwards the original Error (or a fetch/dispatcher hook that lets
 // us capture the cause ourselves), classify on `code`/`cause` instead of text.
+
+// A provider's explicit refusal, as pi-ai words it: Anthropic's `refusal` stop
+// reason without an explanation becomes `The model refused to complete the
+// request` (api/anthropic-messages.js `mapStopReason`), and a stop-reason
+// rendering names `refusal` as the whole value. Both match only the entire
+// message, so an HTTP error body or echoed prompt that merely contains the
+// words keeps its ordinary class.
+const EXPLICIT_REFUSAL = [
+  /^(?:the\s+)?model\s+refused\s+to\s+complete\s+the\s+request\.?$/i,
+  /^(?:provider\s+)?(?:stopped\s+with|stop[\s_]?reason)\s*[:=]\s*["']?refusal["']?\.?$/i,
+]
+
 function classifyPiAiError(message: string): string {
+  const trimmed = message.trim()
+  if (EXPLICIT_REFUSAL.some(pattern => pattern.test(trimmed))) return MODEL_REFUSAL_CODE
   if (/\b(?:401|403)\b/.test(message)) return 'AUTH'
   if (isQuotaExceededError(message)) return QUOTA_EXCEEDED_CODE
   if (/\b429\b|rate.?limit/i.test(message)) return 'RATE_LIMIT'
@@ -98,7 +112,7 @@ export function mapStopReason(message: AssistantMessage, contextWindow?: number)
       // provider completion, not a successful (empty) assistant message.
       // Empty text blocks with zero output tokens also count as empty responses.
       const hasSubstantiveContent = message.content.some(block =>
-        block.type !== 'text' || block.text.length > 0
+        block.type !== 'text' || block.text.length > 0,
       )
       if (!hasSubstantiveContent && message.usage.output === 0) {
         return {

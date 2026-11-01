@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { AttachmentId, ImageVariantId } from '@deepseek-ai/dsh-attachment'
 import type { AttachmentStore, ImageAttachmentRef, ImageRequestTarget, RequestImageAttachment } from '@deepseek-ai/dsh-attachment'
-import { createToolResultMessage, createUserMessage, ToolCallId, CONTEXT_WINDOW_EXCEEDED_CODE, EMPTY_RESPONSE_CODE, createMessage } from '@deepseek-ai/dsh-llm'
+import { createToolResultMessage, createUserMessage, ToolCallId, CONTEXT_WINDOW_EXCEEDED_CODE, EMPTY_RESPONSE_CODE, MODEL_REFUSAL_CODE, createMessage } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, StreamChunk } from '@deepseek-ai/dsh-llm'
 import type { AssistantMessage, AssistantMessageEvent, Usage } from '@earendil-works/pi-ai'
 import { transformMessages } from '@earendil-works/pi-ai/api/transform-messages'
@@ -958,6 +958,26 @@ describe('mapStopReason / mapUsage', () => {
       stopReason: 'error',
       errorMessage: 'vector length limit exceeded',
     }))).toMatchObject({ kind: 'error', failure: { code: 'PI_AI_ERROR' } })
+  })
+
+  it.each([
+    'The model refused to complete the request',
+    'model refused to complete the request.',
+    'Provider stopped with: refusal',
+    'stop_reason: refusal',
+  ])('maps the explicit provider refusal %j to MODEL_REFUSAL', (errorMessage) => {
+    expect(mapStopReason(assistant({ stopReason: 'error', errorMessage })))
+      .toEqual({ kind: 'error', failure: { message: errorMessage, code: MODEL_REFUSAL_CODE } })
+  })
+
+  it.each([
+    ['HTTP 400: The model refused to complete the request', 'INVALID_REQUEST'],
+    ['HTTP 400: invalid_request_error: prompt mentions refusal policy', 'INVALID_REQUEST'],
+    ['user asked: why did the model refused to complete the request?', 'PI_AI_ERROR'],
+    ['Provider stopped with: sensitive', 'PI_AI_ERROR'],
+  ])('keeps non-refusal text %j out of MODEL_REFUSAL', (errorMessage, code) => {
+    expect(mapStopReason(assistant({ stopReason: 'error', errorMessage })))
+      .toMatchObject({ kind: 'error', failure: { code } })
   })
 
   it.each([
